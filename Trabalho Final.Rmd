@@ -1,0 +1,226 @@
+---
+title: "Trabalho Final"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+---
+Autor: Igor Dias Cangussu
+
+Escola de Engenharia - UFMG 2018
+
+
+Neste trabalho, abordaremos e faremos uma comparações de alguns algoritmos para de classificação de vinhos de um dado dataset.(https://www.kaggle.com/datasets) Este dataset possui dados quimicos de vinhos a serem classificados em categorias de qualidade. 
+
+São 4898 amostras e 11 variáveis mais a classificação como visto abaixo: 
+
+```{r include=FALSE, results='hide', message=FALSE, warning=FALSE}
+library(stats)
+library(e1071)
+library(mclust, quietly=TRUE)
+library(sBIC)
+library(factoextra)
+library(GGally)
+library(fossil)
+library(flexclust)
+library(class)
+library(caret)
+library(magrittr)
+library(dplyr)
+library(ggpubr)
+```
+
+```{r}
+data <- as.matrix(read.table("/Users/Goduu1/Documents/UFMG/winequality-white.csv", header = TRUE, sep=","))
+summary(data)
+```
+
+Para iniciar, vamos gerar um vetor do tamanho do número de linhas de 'data' com ordem aleatória para geração dos conjuntos de treino e de teste a serem utilizados posteriormente.
+
+O conjunto de treino e de testes possuem 3/4 e 1/4 do total de dados respectivamente.
+
+```{r results='hide', message=FALSE, warning=FALSE}
+set.seed(123)
+vetRand <- sample.int(nrow(data))
+conjTrain <- data[vetRand[0:(3*nrow(data)/4)],]
+conjTest <- data[vetRand[(3*nrow(data)/4):nrow(data)],]
+```
+
+Vamos separar a classificação dos outros atributos para utilização nos algoritmos seguintes. A variável class representa a classificação e a variável X representa os outros atributos.
+
+```{r}
+class <- conjTrain[,12]
+table(class)
+X <- conjTrain[,1:11]
+colnames(X)
+```
+
+Vamos agora plotar os grafico de correlação entre as variáveis.  
+```{r}
+clPairs(X, class)
+```
+
+Podemos perceber, que por se tratar de dados reais, é muito dificil identificar todos os grupos nestes gráficos. Poucos são os que se se destacam mais separadamente dos outros.  
+
+###Gaussian mixture models
+
+O algoritmo para clasificação a seguir (MclustDA) do pacote 'mclust' faz a análise discriminante baseada no GMM.
+```{r results='hide', message=FALSE, warning=FALSE}
+set.seed(123)
+mod1 <- MclustDA(X, class, modelType = "EDDA")
+```
+```{r}
+summary(mod1)
+```
+
+Nossos resultados obtiveram erro de 47% ou 53% de eficácia. 
+
+###Principal component analisys
+
+Para tentarmos a redução da dimensionalidade e compararmos os resultados foi utilizado a função prcomp com os dados normalizados (scale = TRUE). Ela faz uma análise dos componentes principais (PCA) em uma dada matriz dado como parâmetro o numero de componentes desejado (rank).  
+```{r}
+PCA <- prcomp(t(X), rank = 7, scale = TRUE)
+```
+
+
+Vamos tentar agora novamente a análise GMM feita acima com os dados agora com 7 dimensões.
+
+```{r results='hide', message=FALSE, warning=FALSE}
+mod2 <- MclustDA(PCA$rotation, class, modelType = "EDDA")
+```
+```{r}
+summary(mod2)
+```
+
+Podemos ver, que, como esperado, diminuindo-se as dimensões de 11 para 7, o erro aumenta para 52%. Dado a aglomeração dos dados, faz todo sentido a dimensão reduzida fazer com que percamos informações e logo temos um menor número de acerto.
+
+###Kmeans
+
+Tentaremos agora utilizar o Kmeans do pacote 'stats' para o agrupamento em 7 núcleos. 
+```{r}
+fit.km <- kmeans(X, centers = 7)
+ct.km <- table(class, fit.km$cluster)
+rand.index(class, fit.km$cluster)
+
+```
+A funçnao rand.index nos da uma medida de similaridade entra duas partições. Ela vai de 0 (sem similaridade) até 1 (similaridade perfeita). Nosso valor de 0.57 representa algo em torno de 62% de acerto comparado com a classificação original. 
+
+
+Tentaremos agora para o mesmo caso com dimensionalidade 7 para vermos os resultados.
+
+```{r}
+fit.kmPCA <- kmeans(PCA$rotation, 7)
+rand.index(class, fit.kmPCA$cluster)
+
+```
+Nosso número de similaridade neste caso, não teve muita diferença, mas tendo um pequeno desvio para menos, o que é esperado para a análise com menos dimensões. 
+
+###K-nearest neigbors
+
+Utilizaremos agora o KNN atravez da função knn do pacote 'class'. Ela analisa para cada linha do conjunto de teste os k vizinhos mais próximos do conjunto de treinamento (proximidade atravéz da distância euclidiana) e a classificação é decidida pela maioria dos "votos". Ou seja, é atribuida a classificação do grupo do maior número de vizinhos próximos.
+
+Testaremos também para diferentes valores de k (1, 5 e 20)
+```{r results = 'hold'}
+classTest <- conjTest[,12]
+knn.1 <- knn(X, conjTest[,1:11], class, k=1)
+knn.5 <- knn(X, conjTest[,1:11], class, k=5)
+knn.20 <- knn(X, conjTest[,1:11], class, k=20)
+
+ranInd.1 <- rand.index(classTest, as.numeric(knn.1))
+ranInd.5 <- rand.index(classTest, as.numeric(knn.5))
+ranInd.20 <- rand.index(classTest, as.numeric(knn.20))
+
+print("Similaridade para k = 1: ")
+ranInd.1 
+print("Similaridade para k = 5: ")
+ranInd.5 
+print("Similaridade para k = 20: ")
+ranInd.20
+```
+
+Podemos observar, que ao contrário do que normalmente acontece no algorítmo do KNN, onde quanto mais vizinhos obeservamos, melhor costuma ser o fitting, ao aumentar o número de k, nosso índice de acerto diminui, isso se da pela grande aglomeração dos grupos. Uma vez que eles estão pouco dispersos, ao classificar por maior número de vizinhos, tem-se uma grande probabilidade de analisar vizinhos que não são do grupo original. O melhor fitting foi para um vizinho com 63% de acerto. 
+
+
+Vamos ver se temos alguma diferença nos resultados com menos dimensões. 
+```{r results='hold'}
+classTest <- conjTest[,12]
+PCATest <- prcomp(t(conjTest[,1:11]), rank = 7, scale = TRUE)
+knn.1 <- knn(PCA$rotation, PCATest$rotation, class, k=1)
+knn.5 <- knn(PCA$rotation, PCATest$rotation, class, k=5)
+knn.20 <- knn(PCA$rotation, PCATest$rotation, class, k=20)
+
+ranInd.1 <- rand.index(classTest, as.numeric(knn.1))
+ranInd.5 <- rand.index(classTest, as.numeric(knn.5))
+ranInd.20 <- rand.index(classTest, as.numeric(knn.20))
+
+print("Similaridade para k = 1: ")
+ranInd.1 
+print("Similaridade para k = 5: ")
+ranInd.5 
+print("Similaridade para k = 20: ")
+ranInd.20
+```
+
+Não conseguimos nenhuma melhora e os resultados foram condizentes com o teste que fizemos anteriormente usando o PCA. 
+
+###Multidimensional scaling
+
+Usando a função cmdscale do pacote 'stats' vamos tentar a diminuição de dimensionalidade para o grau 2. Esta é uma função de MDS classico, também conhecida como principal coordinates analysis. Ela pega um conjunto de dissimilaridades e retorna um conjunto de pontos tais que a distancia entre os pontos é igual aproximadamente às dissimilaridades. Vamos utilizar também o resultado obtido no kmeans para fazer o agrupamento. 
+
+```{r}
+mds <- X %>% dist() %>% cmdscale() %>%as_tibble()
+colnames(mds) <- c("Dim.1", "Dim.2")
+
+mds.clust <- kmeans(mds, centers = 7)$cluster %>%
+  as.factor()
+mds.clust <- fit.km$cluster %>% as.factor()
+mds <- mds %>% mutate(groups = mds.clust)
+ggscatter(mds, x = "Dim.1", y = "Dim.2", color = "groups",palette = "jco",size = 1, ellipse = TRUE,ellipse.type = "convex",repel = TRUE)
+```
+
+Podemos ver pelo gráfico, que os grupos ficaram bem mais distinguíveis. Mas será que a eficiência do agrupamento foi muito diferente das demais? vamos checar:
+
+```{r}
+rand.index(as.integer(mds.clust) ,class)
+```
+O grau de acertividade foi semelhante ao encontrado no agrupamento por kmeans, logo podemos concluir que a redução da dimensionalidade, apesar de nos dar uma visão aparentemente boa de agrupamento dos elementos. Esta não é suficiente para um problema complexo como este.
+
+
+
+###Naive Bayes
+
+Utilizaremos agora o algoritmo Naive Bayes. 
+A funçnao naiveBayes do pacote 'e1071' calcula as probabilidades a posteriori de uma variavel de uma classe categórica dado um preditor independente usando a regra de Bayes.
+A função predict é uma função de predição generica que faz a classificação.
+Finalizando com o plot da matriz de confusão e análise.
+
+```{r}
+fitBayes <- naiveBayes(X, as.factor(class), type="raw")
+    pred1 <- predict(fitBayes, X, type="class")
+    confusionMatrix(pred1, as.factor(class))
+```
+O nível de acerto neste último algorítmo foi bem parecido com os anteriores, entre 42 e 46% porém um pouco abaixo. 
+
+Podemos concluir que para problemas reais muito aglomerados os métodos abordados não são muito efetivos, acertando por volta da metade das vezes. 
+
+
+
+##Fontes de pesquisa: 
+(acesso em 20-06-2018)
+
+https://www.r-statistics.com/2013/08/k-means-clustering-from-r-in-action/
+
+http://www.sthda.com/english/articles/31-principal-component-methods-in-r-practical-guide/118-principal-component-analysis-in-r-prcomp-vs-princomp/
+
+https://stats.stackexchange.com/questions/181318/r-caret-naive-bayes-untuned-results-differ-from-klar
+
+https://cran.r-project.org/web/packages/mclust/vignettes/mclust.html
+
+https://cran.r-project.org/web/packages/sBIC/vignettes/GaussianMixtures.pdf
+
+https://rstudio-pubs-static.s3.amazonaws.com/123438_3b9052ed40ec4cd2854b72d1aa154df9.html
+
+https://davetang.org/muse/2017/09/21/the-rand-index/
+
+http://www.sthda.com/english/articles/31-principal-component-methods-in-r-practical-guide/122-multidimensional-scaling-essentials-algorithms-and-r-code/
